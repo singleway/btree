@@ -1,157 +1,167 @@
-// TestBTree02.cpp : �������̨Ӧ�ó������ڵ㡣
-//
+#include <string.h>
+#include <utility>
+#include <stdlib.h>
+#include <time.h>
+#include <iostream>
 
-#include "stdafx.h"
-#include <cassert>
-#include <cstring>
-struct CBTreeNode
+#define MAX_KEY 4	//B树节点的最大度数
+
+using std::cout;
+using std::endl;
+
+struct ST_BTreeNode
 {
-	enum {NODE_SIZE = 100};
-	enum {END_POS = NODE_SIZE + 1};
-	
-	struct CNodePosition
-	{
-		CBTreeNode* m_pCurNode;
-		int			m_nCurIndex;
-	};
-	struct CNode
-	{
-		int			m_nkey;
-		int			m_nValue;
-		CBTreeNode*	m_pSubNode;	
-	};
-
-	size_t m_nkeyCount;
-	CBTreeNode* m_pParentNode;
-	CNode m_aNodeTbl[NODE_SIZE];
-
-	CBTreeNode()
-	{
-		m_nkeyCount = 0;
+	int key_num;								///< 当前存储的数据个数
+	bool is_leaf;								///< 是否是(伪)叶节点[真正的叶子节点是空指针]
+	int keys[MAX_KEY-1];							///< 键值数组
+	ST_BTreeNode *key_pointers[MAX_KEY];		///< 子节点指针数组
+	ST_BTreeNode() {
+		memset( this, 0, sizeof( ST_BTreeNode ) );
 	}
-	size_t GetKeyCount()
+};
+
+std::pair<ST_BTreeNode *, int> search( ST_BTreeNode *root_ptr, int key )
+{
+	int i = 0;
+	std::pair<ST_BTreeNode *, int> result;
+
+	while(( root_ptr->keys[i] < key ) && ( i < root_ptr->key_num ) )//找到节点中数据所在位置
+		i++;
+
+	if( root_ptr->keys[i] == key )	//数据找到
+		return std::make_pair( root_ptr, i );
+
+	if( root_ptr->is_leaf )	//已经搜索到叶节点
+		return std::make_pair(( ST_BTreeNode * )NULL, -1 );
+	else	//非叶节点，继续搜索子树节点
+		return search( root_ptr->key_pointers[i], key );
+}
+
+void split( ST_BTreeNode *parent_ptr, ST_BTreeNode *child_ptr, int child_pos )
+{
+	ST_BTreeNode *new_node_ptr = new ST_BTreeNode;
+	new_node_ptr->is_leaf = child_ptr->is_leaf;
+	new_node_ptr->key_num = MAX_KEY / 2 - 1;
+
+	//拷贝节点数据
+	for( int i = 0; i < MAX_KEY / 2 - 1; i++ )
+		new_node_ptr->keys[i] = child_ptr->keys[i + MAX_KEY / 2];
+
+	//非叶节点，则拷贝指针
+	if( !child_ptr->is_leaf )
+		for( int i = 0; i < MAX_KEY / 2; i++ )
+			new_node_ptr->key_pointers[i] = child_ptr->key_pointers[i + MAX_KEY / 2];
+	child_ptr->key_num = MAX_KEY / 2 - 1;
+
+	//将中位数作为索引插入到双亲节点中
+	int i;
+	for( i = parent_ptr->key_num; i > child_pos; i-- )
 	{
-		return m_nkeyCount;
+		parent_ptr->keys[i + 1] = parent_ptr->keys[i];
+		parent_ptr->key_pointers[i + 1] = parent_ptr->key_pointers[i];
 	}
-	int Insert(int nKey,int nValue,CBTreeNode* pNode)
+	parent_ptr->keys[i] = child_ptr->keys[MAX_KEY / 2 - 1];
+	parent_ptr->key_num++;
+	parent_ptr->key_pointers[i + 1] = new_node_ptr;
+}
+
+void insert_simple( ST_BTreeNode *node_ptr, int key )
+{
+	int i = node_ptr->key_num;
+
+	if( node_ptr->is_leaf )
 	{
-		int i = 1;
-		while (1)
+		//向后移动
+		while(( i > 0 ) && ( node_ptr->keys[i - 1] > key ) )
 		{
-			if (nKey < m_aNodeTbl[i].m_nkey)
-			{
-				break;
+			node_ptr->keys[i] = node_ptr->keys[i - 1];
+			i--;
+		}
+		//插入
+		node_ptr->keys[i] = key;
+		node_ptr->key_num++;
+	}
+	else
+	{
+		while(( i > 0 ) && ( node_ptr->keys[i - 1] > key ) )
+			i--;
+
+		ST_BTreeNode *child_ptr = node_ptr->key_pointers[i];
+
+		if( child_ptr->key_num == MAX_KEY - 1 )
+		{
+			split( node_ptr, child_ptr, i );
+			if( key > node_ptr->keys[i] )
+				i++;
+		}
+
+		child_ptr = node_ptr->key_pointers[i];
+		insert_simple( child_ptr, key );
+	}
+}
+
+ST_BTreeNode *insert( ST_BTreeNode *root_ptr, int key )
+{
+	if( root_ptr->key_num == MAX_KEY - 1 )
+	{
+		ST_BTreeNode *new_node_ptr = new ST_BTreeNode;
+		new_node_ptr->key_pointers[0] = root_ptr;
+		split( new_node_ptr, root_ptr, 0 );
+		insert_simple( new_node_ptr, key );
+
+		return new_node_ptr;
+	}
+	else
+	{
+		insert_simple( root_ptr, key );
+		return root_ptr;
+	}
+}
+
+void breadth_first_traversal( ST_BTreeNode *root_ptr )
+{
+	int queue_num = 0;
+	ST_BTreeNode *queue[20], *current;
+
+	queue[queue_num] = root_ptr;
+	queue_num++;
+
+	while( queue_num > 0 )
+	{
+		current = queue[0];
+		queue_num--;
+		for( int i = 0; i < queue_num; i++ )
+			queue[i] = queue[i+1];
+		cout << "{ ";
+		for( int i = 0; i < current->key_num; i++ )
+			cout << current->keys[i] << " ";
+		cout << "}  ";
+		if( current != NULL && current->is_leaf != 1 ) {
+			for( int i = 0; i <= current->key_num; i++ ) {
+				queue[queue_num] = current->key_pointers[i];
+				queue_num++;
 			}
 		}
-		for (int r = GetKeyCount();r > i;r--)
-		{
-			m_aNodeTbl[r + 1] = m_aNodeTbl[r];
-		}
-		m_aNodeTbl[i].m_nkey = nKey;
-		m_aNodeTbl[i].m_nValue = nValue;
-		m_aNodeTbl[i].m_pSubNode = pNode;
-		m_nkeyCount++;
-		return i;
 	}
-	int Search(int nKey,CNodePosition& rNodePos)
-	{
-		for (int i = 1;i < m_nkeyCount;i++)
-		{
-			if (m_aNodeTbl[i].m_nkey == nKey)
-			{
-				rNodePos.m_nCurIndex = i;
-				rNodePos.m_pCurNode = m_aNodeTbl->m_pSubNode;
-				return i;
-			}
-		}
-	}
-	
-};
-struct CNodePosition
-{
-	CBTreeNode* m_pCurNode;
-	int			m_nCurIndex;
-};
-int SearchKey(CBTreeNode* pNode,int nKey)
-{
-	assert(pNode);
-	//С�ڵ�һ��KEY
-	for (int i = 1;i <= pNode->GetKeyCount();i++)
-	{
-		if (pNode->m_aNodeTbl[i].m_nkey <= nKey)
-		{
-			return i;
-		}
-	}
-	return 0;
-	
+	cout<<endl;
 }
-bool Search(CBTreeNode* pNode,int nKey,int& nValue,CNodePosition& rNodePos)
-{
 
-	int nSearchIndex = 0;
-	bool bFound = 0;
-	CBTreeNode* pCurrentNode = pNode;
-	
-	
+int main()
+{
+	ST_BTreeNode *root = new ST_BTreeNode;
+	root->is_leaf = true;
 
-	while ((NULL != pCurrentNode) && !bFound)
+#define MAX_VALUE 100
+#define ARRAY_LENGTH 15
+	int array[ARRAY_LENGTH];
+	srand(( unsigned )time( NULL ) );
+	for( int i = 0; i < ARRAY_LENGTH; i++ )
 	{
-		nSearchIndex = SearchKey(pCurrentNode,nKey);
-		if (nSearchIndex > 0 && pCurrentNode->m_aNodeTbl[nSearchIndex].m_nkey == nKey)
-		{
-			rNodePos.m_pCurNode = pCurrentNode;
-			rNodePos.m_nCurIndex = nSearchIndex;
-			nValue = pCurrentNode->m_aNodeTbl[nSearchIndex].m_nValue;
-			bFound = true;
-		}
-		else
-		{
-			rNodePos.m_pCurNode = pCurrentNode;
-			rNodePos.m_nCurIndex = nSearchIndex;
-			pCurrentNode = pCurrentNode->m_aNodeTbl[nSearchIndex].m_pSubNode;
-			bFound = false;
-		}
+		array[i] = rand() % MAX_VALUE;
+		root = insert( root, array[i] );
+		breadth_first_traversal( root );
 	}
-	return bFound;
-}
-int InsertElement(CBTreeNode* pNode,int nKey,int nValue,CBTreeNode* pSubNode)
-{
-	return pNode->Insert(nKey,nValue,pSubNode);
-}
-void CreateRootNode(CBTreeNode*& pNode,CBTreeNode* pOriginLeft,CBTreeNode* pOriginRight)
-{
-	pNode = new CBTreeNode;
-	memset(pNode,0,sizeof (CBTreeNode));
-	pNode->m_aNodeTbl[0].m_pSubNode = pOriginLeft;
-	pNode->m_aNodeTbl[0].m_nkey = 1;
-	pNode->m_aNodeTbl[1].m_pSubNode = pOriginRight;
-	pNode->m_aNodeTbl[1].m_nkey = ??
-	pNode->m_nkeyCount = 1;
-	pNode->m_pParentNode = NULL;
-	
-}
-int Insert(CBTreeNode*& pNode,int nKey,int nValue)
-{
-	CNodePosition oNodePos;
-	int nVal = 0;
-	if (Search(pNode,nKey,nVal,oNodePos))
-		return -1;
-	CBTreeNode* pParentNode = oNodePos.m_pCurNode;
-	while (pParentNode)
-	{
-		InsertElement(oNodePos.m_pCurNode,nKey,nValue,pParentNode);
-	}
-	if (NULL == pParentNode)
-	{
 
-	}
-	
-}
-int _tmain(int argc, _TCHAR* argv[])
-{
-	CBTreeNode* pNode = NULL;
-	Insert(pNode,1,1);
 	return 0;
 }
 
